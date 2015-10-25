@@ -151,8 +151,6 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 
 	// Now go ahead and mount the EBS device to the desired mountpoint.
 	// TODO: support encrypted filesystems.
-	// TODO: detect and auto-format unformatted filesystems.
-	// TODO: permit the filesystem type in the name; or auto-detect.
 	if out, err := exec.Command("mount", dev, mnt).CombinedOutput(); err != nil {
 		// Make sure to detach the instance before quitting (ignoring errors).
 		d.detachVolume(name)

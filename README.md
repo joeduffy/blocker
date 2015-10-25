@@ -45,8 +45,8 @@ see information something like the following:
 
 Additional information for all mounting and unmounting activities is logged.
 
-**Note, you must be authenticated with AWS before starting Blocker.**  See
-[this guide](https://github.com/aws/aws-sdk-go/wiki/Getting-Started-Credentials)
+**Note, AWS authentication information must be available before starting Blocker.**
+See [this guide](https://github.com/aws/aws-sdk-go/wiki/Getting-Started-Credentials)
 for details on how this is done.  In short, the easiest is to generate an
 `~/.aws/credentials` file containing an `aws_access_key_id` and
 `aws_secret_access_key`.  This is subtly different than what you get from

@@ -30,6 +30,7 @@ $sh_c "curl -sSL $download | tar xz"
 echo "Installing Blocker..."
 $sh_c 'mv blocker /usr/local/bin/blocker'
 $sh_c 'chmod +x /usr/local/bin/blocker'
+$sh_c 'mkdir -p /etc/docker/plugins'
 $sh_c 'echo "unix:///var/run/blocker.sock" > /etc/docker/plugins/blocker.sock'
 $sh_c 'mv blocker.conf /etc/init/blocker.conf'
 

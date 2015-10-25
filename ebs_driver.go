@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/satori/go.uuid"
@@ -22,35 +23,35 @@ type ebsVolumeDriver struct {
 }
 
 func NewEbsVolumeDriver() (VolumeDriver, error) {
-	ec2meta := ec2metadata.New(nil)
+	d := &ebsVolumeDriver{
+		volumes: make(map[string]string),
+	}
+	d.ec2meta = ec2metadata.New(nil)
 
-	if !ec2meta.Available() {
+	// Fetch AWS information, validating along the way.
+	if !d.ec2meta.Available() {
 		return nil, errors.New("Not running on an EC2 instance.")
 	}
-
-	d := &ebsVolumeDriver{}
-
 	var err error
-	d.awsInstanceId, err = ec2meta.GetMetadata("instance-id")
-	if err != nil {
+	if d.awsInstanceId, err = d.ec2meta.GetMetadata("instance-id"); err != nil {
+		return nil, err
+	}
+	if d.awsRegion, err = d.ec2meta.Region(); err != nil {
+		return nil, err
+	}
+	if d.awsAvailabilityZone, err =
+		d.ec2meta.GetMetadata("placement/availability-zone"); err != nil {
 		return nil, err
 	}
 
-	d.awsRegion, err = ec2meta.Region()
-	if err != nil {
-		return nil, err
-	}
+	d.ec2 = ec2.New(aws.NewConfig().WithRegion(d.awsRegion))
 
-	d.awsAvailabilityZone, err = ec2meta.GetMetadata("placement/availability-zone")
-	if err != nil {
-		return nil, err
-	}
-
-	return &ebsVolumeDriver{
-		ec2:     ec2.New(aws.NewConfig().WithRegion(d.awsRegion)),
-		ec2meta: ec2meta,
-		volumes: make(map[string]string),
-	}, nil
+	// Print some diagnostic information and then return the driver.
+	fmt.Printf("Auto-detected EC2 information:\n")
+	fmt.Printf("\tInstanceId        : %v\n", d.awsInstanceId)
+	fmt.Printf("\tRegion            : %v\n", d.awsRegion)
+	fmt.Printf("\tAvailability Zone : %v\n", d.awsAvailabilityZone)
+	return d, nil
 }
 
 func (d *ebsVolumeDriver) getEbsInfo(name string) error {
@@ -156,21 +157,22 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	}
 
 	// Now auto-generate a random mountpoint.
-	mnt := "/mnt/blocker" + uuid.NewV4().String()
+	mnt := "/mnt/blocker/" + uuid.NewV4().String()
 
 	// Ensure the directory /mnt/blocker/<m> exists.
 	if err := os.MkdirAll(mnt, os.ModeDir|0700); err != nil {
 		return "", err
 	}
 	if stat, err := os.Stat(mnt); err != nil || !stat.IsDir() {
-		return "", errors.New("Mountpoint creation failed.")
+		return "", fmt.Errorf("Mountpoint %v is not a directory: %v", mnt, err)
 	}
 
 	// Now go ahead and mount the EBS device to the desired mountpoint.
-	// TODO: permit the filesystem type in the name.
+	// TODO: support encrypted filesystems.
 	// TODO: detect and auto-format unformatted filesystems.
+	// TODO: permit the filesystem type in the name; or auto-detect.
 	if err := syscall.Mount(dev, mnt, "ext4", 0, ""); err != nil {
-		return "", err
+		return "", fmt.Errorf("Mounting device %v to %v failed: %v", dev, mnt, err)
 	}
 
 	// And finally set and return it.
@@ -179,55 +181,34 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 }
 
 func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
-	dev, err := d.findFreeDeviceForAttach()
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := d.ec2.AttachVolume(&ec2.AttachVolumeInput{
-		Device:     aws.String(dev),
-		InstanceId: aws.String(d.awsInstanceId),
-		VolumeId:   aws.String(name),
-	}); err != nil {
-		return "", err
-	}
-
-	fmt.Printf("Attached EBS volume %v to %v:%v.", name, d.awsInstanceId, dev)
-	return dev, nil
-}
-
-func (d *ebsVolumeDriver) findFreeDeviceForAttach() (string, error) {
-	// Get a list of instance devices.
-	volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-		Filters: []*ec2.Filter{
-			{
-				Name: aws.String("attachment.instance-id"),
-				Values: []*string{
-					aws.String(d.awsInstanceId),
-				},
-			},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-
-	devices := make(map[string]bool)
-	for _, volume := range volumes.Volumes {
-		if len(volume.Attachments) == 0 {
-			continue
-		}
-		devices[*volume.Attachments[0].Device] = true
-	}
-
-	// Now find the first free devices to attach the EBS volume.  See
+	// Now find the first free device to attach the EBS volume to.  See
 	// http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html
 	// for recommended naming scheme (/dev/sd[f-p]).
 	for _, c := range "fghijklmnop" {
 		dev := "/dev/sd" + string(c)
-		if _, exists := devices[dev]; !exists {
-			return dev, nil
+
+		// TODO: we could check locally first to eliminate a few network
+		//     roundtrips in the event that some devices are used.  Even if we
+		//     did that, however, we'd need the checks regarding the AWS request
+		//     failing below, because of TOCTOU.
+
+		if _, err := d.ec2.AttachVolume(&ec2.AttachVolumeInput{
+			Device:     aws.String(dev),
+			InstanceId: aws.String(d.awsInstanceId),
+			VolumeId:   aws.String(name),
+		}); err != nil {
+			if awsErr, ok := err.(awserr.Error); ok &&
+				awsErr.Code() == "InvalidParameterValue" {
+				// If AWS is simply reporting that the device is already in
+				// use, then go ahead and check the next one.
+				continue
+			}
+
+			return "", err
 		}
+
+		fmt.Printf("Attached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
+		return dev, nil
 	}
 
 	return "", errors.New("No devices available for attach: /dev/sd[f-p] taken.")

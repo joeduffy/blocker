@@ -50,14 +50,14 @@ func listen(d VolumeDriver, socket bool, done chan bool) {
 		l, err := net.Listen("unix", SocketFile)
 		if err != nil {
 			fmt.Printf("Error listening on socket %s: %s.\n", SocketFile, err)
-			return
-		}
-		defer l.Close()
+		} else {
+			defer l.Close()
 
-		fmt.Printf("Ready to go; listening on socket %s...\n", SocketFile)
-		err = http.Serve(l, handler)
-		if err != nil {
-			fmt.Printf("HTTP server error: %s.\n", err)
+			fmt.Printf("Ready to go; listening on socket %s...\n", SocketFile)
+			err = http.Serve(l, handler)
+			if err != nil {
+				fmt.Printf("HTTP server error: %s.\n", err)
+			}
 		}
 	} else {
 		const ListenAddress = ":1234"

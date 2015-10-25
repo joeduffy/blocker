@@ -55,25 +55,6 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	return d, nil
 }
 
-func (d *ebsVolumeDriver) getEbsInfo(name string) error {
-	// Query EC2 to make sure this volume is indeed available.
-	volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-		VolumeIds: []*string{
-			aws.String(name),
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if len(volumes.Volumes) != 1 {
-		return errors.New("Cannot find EBS volume.")
-	}
-
-	// TODO: check that it's in the right region.
-
-	return nil
-}
-
 func (d *ebsVolumeDriver) Create(name string) error {
 	m, exists := d.volumes[name]
 	if exists {

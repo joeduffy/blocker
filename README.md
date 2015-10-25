@@ -38,7 +38,7 @@ daemon will automatically attach and detach volumes as necessary.
 
 The install script installs an Upstart service named `blocker` whose output is
 logged to the `/var/log/upstart/blocker.log` file.  If all has gone well you'll
-see information something like the following:
+see information something like this:
 
     2015/10/25 18:07:11 blocker:starting up...
     2015/10/25 18:07:11 Auto-detected EC2 information:

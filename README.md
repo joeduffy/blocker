@@ -4,7 +4,7 @@ Blocker is a ridiculously simple stateless volume plugin for Docker.  It makes
 using [Amazon Elastic Block Store](https://aws.amazon.com/ebs/) volumes trivial,
 a pretty useful thing for microservices like databases:
 
-    docker run -v <ebs-volume-id>:<mount> --volume-driver blocker ...
+    docker run -v <ebs-volume-id>:<container-path> --volume-driver blocker ...
 
 Blocker was designed to work with [Docker](https://docs.docker.com/)
 [Machine](https://docs.docker.com/machine/) and
@@ -22,6 +22,11 @@ Once installed, you can mount a volume in the usual Docker style, by passing
 `--volume-driver blocker` and specifying your EBS volume ID as the name.  E.g.:
 
     docker run -v vol-933e6c67:/test --volume-driver blocker ...
+
+Once the container starts, the volume will be accessible inside at `/test`.
+
+Volumes must be created and mounted prior to using them.  Per Blocker's stance
+on simplicity, it doesn't attempt to do anything fancy here.
 
 The target volume must be in the same AWS region and availability zone as the
 machine running Docker.  Blocker will print these out when it starts up.  The

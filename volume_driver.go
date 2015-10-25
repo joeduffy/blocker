@@ -9,14 +9,14 @@ type VolumeDriver interface {
 	// manifest the volume on the filesystem yet, until Mount is called.
 	Create(name string) error
 
-	// Removes an existing volume.
-	Remove(name string) error
-
 	// Mounts a volume, returning its mountpoint on the host filesystem.
 	Mount(name string) (string, error)
 
 	// Fetches the host mountpoint location for an existing volume.
 	Path(name string) (string, error)
+
+	// Removes an existing volume.
+	Remove(name string) error
 
 	// Unmounts an existing volume.
 	Unmount(name string) error

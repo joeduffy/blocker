@@ -30,6 +30,7 @@ func main() {
 	go func() {
 		sig := <-signals
 		fmt.Printf("Caught signal %s: shutting down.\n", sig)
+		// TODO: forcibly unmount all volumes.
 		done <- true
 	}()
 
@@ -73,6 +74,7 @@ func listen(d VolumeDriver, socket bool, done chan bool) {
 
 func makeRoutes(d VolumeDriver) http.Handler {
 	r := mux.NewRouter()
+	// TODO: permit options in the name string.
 	r.HandleFunc("/Plugin.Activate", servePluginActivate)
 	r.HandleFunc("/VolumeDriver.Create", serveVolumeSimple(d.Create))
 	r.HandleFunc("/VolumeDriver.Mount", serveVolumeComplex(d.Mount))

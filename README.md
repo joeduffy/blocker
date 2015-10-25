@@ -32,13 +32,6 @@ The target volume must be in the same AWS region and availability zone as the
 machine running Docker.  Blocker will print these out when it starts up.  The
 daemon will automatically attach and detach volumes as necessary.
 
-**Note, you must be authenticated with AWS before starting Blocker.**  See
-[this guide](https://github.com/aws/aws-sdk-go/wiki/Getting-Started-Credentials)
-for details on how this is done.  In short, the easiest is to generate an
-`~/.aws/credentials` file.  An alternative is to export `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` environment variables in a way that the service process
-can read them.
-
 The install script installs an Upstart service named `blocker` whose output is
 logged to the `/var/log/upstart/blocker.log` file.  If all has gone well you'll
 see information something like the following:
@@ -51,6 +44,15 @@ see information something like the following:
     2015/10/25 18:07:11 Ready to go; listening on socket /var/run/blocker.sock...
 
 Additional information for all mounting and unmounting activities is logged.
+
+**Note, you must be authenticated with AWS before starting Blocker.**  See
+[this guide](https://github.com/aws/aws-sdk-go/wiki/Getting-Started-Credentials)
+for details on how this is done.  In short, the easiest is to generate an
+`~/.aws/credentials` file containing an `aws_access_key_id` and
+`aws_secret_access_key`.  This is subtly different than what you get from
+running `aws configure`, though it's very close.  An alternative is to export
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables, but this
+is a bit tricky because the Upstart process needs access to them.
 
 ## Other Platforms
 

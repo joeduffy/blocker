@@ -2,28 +2,32 @@
 
 Blocker is a ridiculously simple stateless volume plugin for Docker.  It makes
 using [Amazon Elastic Block Store](https://aws.amazon.com/ebs/) volumes trivial,
-a pretty useful thing for microservices like databases:
-
-    docker run -v <ebs-volume-id>:<container-path> --volume-driver blocker ...
+a pretty useful thing for microservices like databases.
 
 Blocker was designed to work with [Docker](https://docs.docker.com/)
 [Machine](https://docs.docker.com/machine/) and
 [Swarm](https://docs.docker.com/swarm/) and does as little as possible.  It
 mounts and unmounts volumes, and that's about it.
 
-To install Blocker, just run this on the host running Docker:
+To make an EBS volume accessible to a container, pass `--volume-driver blocker`
+and a `-v` volume mount specification to the `docker run` command:
 
-    wget -qO- \
-        https://raw.githubusercontent.com/joeduffy/blocker/master/res/get.sh | sh
+    docker run \
+        --volume-driver blocker \
+        -v <ebs-volume-id>:<container-path> \
+        ...
 
-If you're running Docker Swarm, you'll want to run this on the master and agents.
+In this example, `<ebs-volume-id>` is the EBS volume identifier, typically in
+the form `vol-00000000`, and `<container-path>` is the path within the
+container at which the volume will be mounted.
 
-Once installed, you can mount a volume in the usual Docker style, by passing
-`--volume-driver blocker` and specifying your EBS volume ID as the name.  E.g.:
+For example, to run a MongoDB container with a persistent volume `vol-933e6c67`,
+run this:
 
-    docker run -v vol-933e6c67:/test --volume-driver blocker ...
-
-Once the container starts, the volume will be accessible inside at `/test`.
+    docker run \
+        --volume-driver blocker \
+        -v vol-933e6c67:/data/db \
+        mongo
 
 EBS volumes must be properly initialized before using them.  Per Blocker's
 stance on simplicity, it doesn't attempt to do anything fancy here.  This likely
@@ -35,6 +39,15 @@ more details on how to do this.
 The target volume must be in the same AWS region and availability zone as the
 machine running Docker.  Blocker will print these out when it starts up.  The
 daemon will automatically attach and detach volumes as necessary.
+
+## Installation
+
+To install Blocker, just run this on the host running Docker:
+
+    wget -qO- \
+        https://raw.githubusercontent.com/joeduffy/blocker/master/res/get.sh | sh
+
+If you're running Docker Swarm, you'll want to run this on the master and agents.
 
 The install script installs an Upstart service named `blocker` whose output is
 logged to the `/var/log/upstart/blocker.log` file.  If all has gone well you'll

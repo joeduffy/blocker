@@ -11,6 +11,8 @@ import (
 	"github.com/gorilla/mux"
 )
 
+const SocketFile = "/var/run/blocker.sock"
+
 func main() {
 	log("blocker: starting up...\n")
 
@@ -20,8 +22,16 @@ func main() {
 		return
 	}
 
-	// Done is a channel that signals program exit.
-	done := make(chan bool, 1)
+	// Manufacture a socket for communication with Docker.
+	l, err := net.Listen("unix", SocketFile)
+	if err != nil {
+		logError("Failed to listen on socket %s: %s.\n", SocketFile, err)
+		return
+	}
+	defer l.Close()
+
+	// Make a channel that signals program exit.
+	exit := make(chan bool, 1)
 
 	// Listen to important OS signals, so we trigger exit cleanly.
 	signals := make(chan os.Signal, 1)
@@ -30,45 +40,22 @@ func main() {
 		sig := <-signals
 		log("Caught signal %s: shutting down.\n", sig)
 		// TODO: forcibly unmount all volumes.
-		done <- true
+		exit <- true
 	}()
 
 	// Now listen for HTTP calls from Docker.
-	go listen(d, true, done)
-
-	// Block until the program exits.
-	<-done
-}
-
-func listen(d VolumeDriver, socket bool, done chan bool) {
 	handler := makeRoutes(d)
-
-	if socket {
-		const SocketFile = "/var/run/blocker/blocker.sock"
-
-		l, err := net.Listen("unix", SocketFile)
-		if err != nil {
-			logError("Failed to listen on socket %s: %s.\n", SocketFile, err)
-		} else {
-			defer l.Close()
-
-			log("Ready to go; listening on socket %s...\n", SocketFile)
-			err = http.Serve(l, handler)
-			if err != nil {
-				logError("HTTP server error: %s.\n", err)
-			}
-		}
-	} else {
-		const ListenAddress = ":1234"
-
-		log("Ready to go; listening on port %s...\n", ListenAddress)
-		err := http.ListenAndServe(ListenAddress, handler)
+	go func() {
+		log("Ready to go; listening on socket %s...\n", SocketFile)
+		err = http.Serve(l, handler)
 		if err != nil {
 			logError("HTTP server error: %s.\n", err)
 		}
-	}
+		exit <- true
+	}()
 
-	done <- true
+	// Block until the program exits.
+	<-exit
 }
 
 func makeRoutes(d VolumeDriver) http.Handler {

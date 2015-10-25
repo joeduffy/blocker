@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -211,18 +212,57 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 			return "", err
 		}
 
-		fmt.Printf("Attached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
+		// The attach operation is asynchronous, so we now need to wait until
+		// it completes before proceeding to the mount.  Sadly, this requires
+		// some clunky retries, sleeps, and that kind of crap.
+		tries := 0
+		for {
+			tries++
 
+			volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+				VolumeIds: []*string{aws.String(name)},
+			})
+			if err != nil {
+				return "", err
+			}
+
+			volume := volumes.Volumes[0]
+			var attachment *ec2.VolumeAttachment
+			if len(volume.Attachments) == 1 {
+				attachment = volume.Attachments[0]
+				if *attachment.State == ec2.VolumeAttachmentStateAttached {
+					// Good to go, we're all attached.
+					break
+				}
+			}
+
+			if tries == 5 {
+				if attachment == nil {
+					return "", fmt.Errorf(
+						"Volume attach failed: expected 1 attachment, got %v",
+						len(volume.Attachments))
+				} else {
+					return "", fmt.Errorf(
+						"Volume attach failed: state is %v", *attachment.State)
+				}
+			}
+
+			fmt.Printf("\tWaiting for EBS attach to complete...\n")
+			time.Sleep(5 * time.Second)
+		}
+
+		// Finally, the attach is complete.
+		fmt.Printf("\tAttached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
 		if _, err := os.Lstat(dev); os.IsNotExist(err) {
 			// On newer Linux kernels, /dev/sd* is mapped to /dev/xvd*.  See
 			// if that's the case.
 			altdev := "/dev/xvd" + string(c)
 			if _, err := os.Lstat(altdev); os.IsNotExist(err) {
-				detachVolume(name)
+				d.detachVolume(name)
 				return "", fmt.Errorf("Device %v is missing after attach.", dev)
 			}
 
-			fmt.Printf("    (local device name is %v)\n", altdev)
+			fmt.Printf("\tLocal device name is %v\n", altdev)
 			dev = altdev
 		}
 
@@ -263,6 +303,6 @@ func (d *ebsVolumeDriver) detachVolume(name string) error {
 		return err
 	}
 
-	fmt.Printf("Detached EBS volume %v from %v.\n", name, d.awsInstanceId)
+	fmt.Printf("\tDetached EBS volume %v from %v.\n", name, d.awsInstanceId)
 	return nil
 }

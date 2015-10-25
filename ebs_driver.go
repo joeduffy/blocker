@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"syscall"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -150,13 +150,7 @@ func (d *ebsVolumeDriver) Unmount(name string) error {
 }
 
 func (d *ebsVolumeDriver) doMount(name string) (string, error) {
-	// First, attach the EBS device to the current EC2 instance.
-	dev, err := d.attachVolume(name)
-	if err != nil {
-		return "", err
-	}
-
-	// Now auto-generate a random mountpoint.
+	// Auto-generate a random mountpoint.
 	mnt := "/mnt/blocker/" + uuid.NewV4().String()
 
 	// Ensure the directory /mnt/blocker/<m> exists.
@@ -167,12 +161,22 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 		return "", fmt.Errorf("Mountpoint %v is not a directory: %v", mnt, err)
 	}
 
+	// Attach the EBS device to the current EC2 instance.
+	dev, err := d.attachVolume(name)
+	if err != nil {
+		return "", err
+	}
+
 	// Now go ahead and mount the EBS device to the desired mountpoint.
 	// TODO: support encrypted filesystems.
 	// TODO: detect and auto-format unformatted filesystems.
 	// TODO: permit the filesystem type in the name; or auto-detect.
-	if err := syscall.Mount(dev, mnt, "ext4", 0, ""); err != nil {
-		return "", fmt.Errorf("Mounting device %v to %v failed: %v", dev, mnt, err)
+	if out, err := exec.Command("mount", dev, mnt).CombinedOutput(); err != nil {
+		// Make sure to detach the instance before quitting (ignoring errors).
+		d.detachVolume(name)
+
+		return "", fmt.Errorf("Mounting device %v to %v failed: %v\n%v",
+			dev, mnt, err, string(out))
 	}
 
 	// And finally set and return it.
@@ -208,6 +212,20 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 		}
 
 		fmt.Printf("Attached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
+
+		if _, err := os.Lstat(dev); os.IsNotExist(err) {
+			// On newer Linux kernels, /dev/sd* is mapped to /dev/xvd*.  See
+			// if that's the case.
+			altdev := "/dev/xvd" + string(c)
+			if _, err := os.Lstat(altdev); os.IsNotExist(err) {
+				detachVolume(name)
+				return "", fmt.Errorf("Device %v is missing after attach.", dev)
+			}
+
+			fmt.Printf("    (local device name is %v)\n", altdev)
+			dev = altdev
+		}
+
 		return dev, nil
 	}
 
@@ -218,8 +236,8 @@ func (d *ebsVolumeDriver) doUnmount(name string) error {
 	mnt := d.volumes[name]
 
 	// First unmount the device.
-	if err := syscall.Unmount(mnt, 0); err != nil {
-		return err
+	if out, err := exec.Command("umount", mnt).CombinedOutput(); err != nil {
+		return fmt.Errorf("Unmounting %v failed: %v\n%v", mnt, err, string(out))
 	}
 
 	// Remove the mountpoint from the filesystem.
@@ -245,6 +263,6 @@ func (d *ebsVolumeDriver) detachVolume(name string) error {
 		return err
 	}
 
-	fmt.Printf("Detached EBS volume %v from %v.", name, d.awsInstanceId)
+	fmt.Printf("Detached EBS volume %v from %v.\n", name, d.awsInstanceId)
 	return nil
 }

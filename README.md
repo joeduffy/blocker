@@ -25,8 +25,12 @@ Once installed, you can mount a volume in the usual Docker style, by passing
 
 Once the container starts, the volume will be accessible inside at `/test`.
 
-Volumes must be created and mounted prior to using them.  Per Blocker's stance
-on simplicity, it doesn't attempt to do anything fancy here.
+EBS volumes must be properly initialized before using them.  Per Blocker's
+stance on simplicity, it doesn't attempt to do anything fancy here.  This likely
+entails creating a filesystem, for example, since EBS creates blank volumes by
+default.  See [this handy guide](
+http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-using-volumes.html) for
+more details on how to do this.
 
 The target volume must be in the same AWS region and availability zone as the
 machine running Docker.  Blocker will print these out when it starts up.  The

@@ -6,10 +6,10 @@ import (
 	"os"
 	"syscall"
 
-	"code.google.com/p/go-uuid/uuid"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/satori/go.uuid"
 )
 
 type ebsVolumeDriver struct {
@@ -156,7 +156,7 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	}
 
 	// Now auto-generate a random mountpoint.
-	mnt := "/mnt/blocker" + uuid.New()
+	mnt := "/mnt/blocker" + uuid.NewV4().String()
 
 	// Ensure the directory /mnt/blocker/<m> exists.
 	if err := os.MkdirAll(mnt, os.ModeDir|0700); err != nil {

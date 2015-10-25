@@ -48,10 +48,10 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	d.ec2 = ec2.New(aws.NewConfig().WithRegion(d.awsRegion))
 
 	// Print some diagnostic information and then return the driver.
-	fmt.Printf("Auto-detected EC2 information:\n")
-	fmt.Printf("\tInstanceId        : %v\n", d.awsInstanceId)
-	fmt.Printf("\tRegion            : %v\n", d.awsRegion)
-	fmt.Printf("\tAvailability Zone : %v\n", d.awsAvailabilityZone)
+	log("Auto-detected EC2 information:\n")
+	log("\tInstanceId        : %v\n", d.awsInstanceId)
+	log("\tRegion            : %v\n", d.awsRegion)
+	log("\tAvailability Zone : %v\n", d.awsAvailabilityZone)
 	return d, nil
 }
 
@@ -247,12 +247,12 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 				}
 			}
 
-			fmt.Printf("\tWaiting for EBS attach to complete...\n")
+			log("\tWaiting for EBS attach to complete...\n")
 			time.Sleep(5 * time.Second)
 		}
 
 		// Finally, the attach is complete.
-		fmt.Printf("\tAttached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
+		log("\tAttached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
 		if _, err := os.Lstat(dev); os.IsNotExist(err) {
 			// On newer Linux kernels, /dev/sd* is mapped to /dev/xvd*.  See
 			// if that's the case.
@@ -262,7 +262,7 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 				return "", fmt.Errorf("Device %v is missing after attach.", dev)
 			}
 
-			fmt.Printf("\tLocal device name is %v\n", altdev)
+			log("\tLocal device name is %v\n", altdev)
 			dev = altdev
 		}
 
@@ -303,6 +303,6 @@ func (d *ebsVolumeDriver) detachVolume(name string) error {
 		return err
 	}
 
-	fmt.Printf("\tDetached EBS volume %v from %v.\n", name, d.awsInstanceId)
+	log("\tDetached EBS volume %v from %v.\n", name, d.awsInstanceId)
 	return nil
 }

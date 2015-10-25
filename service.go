@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -13,11 +12,11 @@ import (
 )
 
 func main() {
-	fmt.Printf("blocker: starting up...\n")
+	log("blocker: starting up...\n")
 
 	d, err := NewEbsVolumeDriver()
 	if err != nil {
-		fmt.Printf("error: %s\n", err)
+		logError("Failed to create an EBS driver: %s.\n", err)
 		return
 	}
 
@@ -29,7 +28,7 @@ func main() {
 	signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGTERM)
 	go func() {
 		sig := <-signals
-		fmt.Printf("Caught signal %s: shutting down.\n", sig)
+		log("Caught signal %s: shutting down.\n", sig)
 		// TODO: forcibly unmount all volumes.
 		done <- true
 	}()
@@ -49,23 +48,23 @@ func listen(d VolumeDriver, socket bool, done chan bool) {
 
 		l, err := net.Listen("unix", SocketFile)
 		if err != nil {
-			fmt.Printf("Error listening on socket %s: %s.\n", SocketFile, err)
+			logError("Failed to listen on socket %s: %s.\n", SocketFile, err)
 		} else {
 			defer l.Close()
 
-			fmt.Printf("Ready to go; listening on socket %s...\n", SocketFile)
+			log("Ready to go; listening on socket %s...\n", SocketFile)
 			err = http.Serve(l, handler)
 			if err != nil {
-				fmt.Printf("HTTP server error: %s.\n", err)
+				logError("HTTP server error: %s.\n", err)
 			}
 		}
 	} else {
 		const ListenAddress = ":1234"
 
-		fmt.Printf("Ready to go; listening on port %s...\n", ListenAddress)
+		log("Ready to go; listening on port %s...\n", ListenAddress)
 		err := http.ListenAndServe(ListenAddress, handler)
 		if err != nil {
-			fmt.Printf("HTTP server error: %s.\n", err)
+			logError("HTTP server error: %s.\n", err)
 		}
 	}
 
@@ -104,12 +103,12 @@ type volumeSimpleResponse struct {
 
 func serveVolumeSimple(f func(string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("* %s\n", r.URL.String())
+		log("* %s\n", r.URL.String())
 		var vol volumeRequest
 		err := json.NewDecoder(r.Body).Decode(&vol)
 		if err == nil {
 			err = f(vol.Name)
-			fmt.Printf("  ...(%s): %v\n", vol.Name, err)
+			log("\tdone: (%s): %v\n", vol.Name, err)
 		}
 		var errs string
 		if err != nil {
@@ -128,13 +127,13 @@ type volumeComplexResponse struct {
 
 func serveVolumeComplex(f func(string) (string, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("* %s\n", r.URL.String())
+		log("* %s\n", r.URL.String())
 		var vol volumeRequest
 		err := json.NewDecoder(r.Body).Decode(&vol)
 		var mountpoint string
 		if err == nil {
 			mountpoint, err = f(vol.Name)
-			fmt.Printf("  ...(%s): (%s, %v)\n", vol.Name, mountpoint, err)
+			log("\tdone: (%s): (%s, %v)\n", vol.Name, mountpoint, err)
 		}
 		var errs string
 		if err != nil {

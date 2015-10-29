@@ -215,7 +215,7 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 				}
 			}
 
-			if tries == 5 {
+			if tries == 12 {
 				if attachment == nil {
 					return "", fmt.Errorf(
 						"Volume attach failed: expected 1 attachment, got %v",

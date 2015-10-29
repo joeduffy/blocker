@@ -31,7 +31,7 @@ echo "Installing Blocker..."
 $sh_c 'mv blocker /usr/local/bin/blocker'
 $sh_c 'chmod +x /usr/local/bin/blocker'
 $sh_c 'mkdir -p /etc/docker/plugins'
-$sh_c 'echo "unix:///var/run/blocker.sock" > /etc/docker/plugins/blocker.sock'
+$sh_c 'echo "unix:///var/run/blocker.sock" > /etc/docker/plugins/blocker.spec'
 $sh_c 'mv blocker.conf /etc/init/blocker.conf'
 
 echo "Starting the Blocker service..."

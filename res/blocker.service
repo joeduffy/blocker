@@ -1,0 +1,15 @@
+[Unit]
+Description=Blocker daemon
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=on-failure
+StandardOutput=tty
+StandardError=tty
+Environment=AWS_SHARED_CREDENTIALS_FILE=/etc/blocker/.aws/credentials
+ExecStart=/usr/local/bin/blocker
+
+[Install]
+WantedBy=multi-user.target
+

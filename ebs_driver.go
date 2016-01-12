@@ -164,7 +164,8 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	return mnt, nil
 }
 
-func (d *ebsVolumeDriver) waitUntilState(name, state string) error {
+func (d *ebsVolumeDriver) waitUntilState(
+	name string, check func(*ec2.Volume) error) error {
 	// Most volume operations are asynchronous, and we often need to wait until
 	// state transitions finish before proceeding to the mount.  Sadly, this
 	// requires some clunky retries, sleeps, and that kind of crap.
@@ -179,26 +180,13 @@ func (d *ebsVolumeDriver) waitUntilState(name, state string) error {
 			return err
 		}
 
-		volume := volumes.Volumes[0]
-		var attachment *ec2.VolumeAttachment
-		if len(volume.Attachments) == 1 {
-			attachment = volume.Attachments[0]
-			if *attachment.State == state {
-				// Good to go.
-				break
-			}
+		// Check to see if the volume reached the intended state; if yes, return.
+		err = check(volumes.Volumes[0])
+		if err == nil {
+			return nil
 		}
-
 		if tries == 12 {
-			if attachment == nil {
-				return fmt.Errorf(
-					"Volume state transition failed: expected 1 attachment, got %v",
-					len(volume.Attachments))
-			} else {
-				return fmt.Errorf(
-					"Volume state transition failed: seeking %v, current is %v",
-					state, *attachment.State)
-			}
+			return err
 		}
 
 		log("\tWaiting for EBS attach to complete...\n")
@@ -209,11 +197,35 @@ func (d *ebsVolumeDriver) waitUntilState(name, state string) error {
 }
 
 func (d *ebsVolumeDriver) waitUntilAttached(name string) error {
-	return d.waitUntilState(name, ec2.VolumeAttachmentStateAttached)
+	return d.waitUntilState(name, func(volume *ec2.Volume) error {
+		var attachment *ec2.VolumeAttachment
+		if len(volume.Attachments) == 1 {
+			attachment = volume.Attachments[0]
+			if *attachment.State == ec2.VolumeAttachmentStateAttached {
+				return nil
+			}
+		}
+		if attachment == nil {
+			return fmt.Errorf(
+				"Volume state transition failed: expected 1 attachment, got %v",
+				len(volume.Attachments))
+		} else {
+			return fmt.Errorf(
+				"Volume state transition failed: seeking %v, current is %v",
+				ec2.VolumeAttachmentStateAttached, *attachment.State)
+		}
+	})
 }
 
 func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
-	return d.waitUntilState(name, ec2.VolumeAttachmentStateDetached)
+	return d.waitUntilState(name, func(volume *ec2.Volume) error {
+		if *volume.State == ec2.VolumeStateAvailable {
+			return nil
+		}
+		return fmt.Errorf(
+			"Volume state transition failed: seeking %v, current is %v",
+			ec2.VolumeStateAvailable, *volume.State)
+	})
 }
 
 func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {

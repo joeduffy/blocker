@@ -164,7 +164,67 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	return mnt, nil
 }
 
+func (d *ebsVolumeDriver) waitUntilState(name, state string) error {
+	// Most volume operations are asynchronous, and we often need to wait until
+	// state transitions finish before proceeding to the mount.  Sadly, this
+	// requires some clunky retries, sleeps, and that kind of crap.
+	tries := 0
+	for {
+		tries++
+
+		volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+			VolumeIds: []*string{aws.String(name)},
+		})
+		if err != nil {
+			return err
+		}
+
+		volume := volumes.Volumes[0]
+		var attachment *ec2.VolumeAttachment
+		if len(volume.Attachments) == 1 {
+			attachment = volume.Attachments[0]
+			if *attachment.State == state {
+				// Good to go.
+				break
+			}
+		}
+
+		if tries == 12 {
+			if attachment == nil {
+				return fmt.Errorf(
+					"Volume state transition failed: expected 1 attachment, got %v",
+					len(volume.Attachments))
+			} else {
+				return fmt.Errorf(
+					"Volume state transition failed: seeking %v, current is %v",
+					state, *attachment.State)
+			}
+		}
+
+		log("\tWaiting for EBS attach to complete...\n")
+		time.Sleep(5 * time.Second)
+	}
+
+	return nil
+}
+
+func (d *ebsVolumeDriver) waitUntilAttached(name string) error {
+	return d.waitUntilState(name, ec2.VolumeAttachmentStateAttached)
+}
+
+func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
+	return d.waitUntilState(name, ec2.VolumeAttachmentStateDetached)
+}
+
 func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
+	// Since detaching is asynchronous, we want to check first to see if the
+	// target volume is in the process of being detached.  If it is, we'll wait
+	// a little bit until it's ready to use.
+	err := d.waitUntilAvailable(name)
+	if err != nil {
+		return "", err
+	}
+
 	// Now find the first free device to attach the EBS volume to.  See
 	// http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html
 	// for recommended naming scheme (/dev/sd[f-p]).
@@ -191,43 +251,9 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 			return "", err
 		}
 
-		// The attach operation is asynchronous, so we now need to wait until
-		// it completes before proceeding to the mount.  Sadly, this requires
-		// some clunky retries, sleeps, and that kind of crap.
-		tries := 0
-		for {
-			tries++
-
-			volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-				VolumeIds: []*string{aws.String(name)},
-			})
-			if err != nil {
-				return "", err
-			}
-
-			volume := volumes.Volumes[0]
-			var attachment *ec2.VolumeAttachment
-			if len(volume.Attachments) == 1 {
-				attachment = volume.Attachments[0]
-				if *attachment.State == ec2.VolumeAttachmentStateAttached {
-					// Good to go, we're all attached.
-					break
-				}
-			}
-
-			if tries == 12 {
-				if attachment == nil {
-					return "", fmt.Errorf(
-						"Volume attach failed: expected 1 attachment, got %v",
-						len(volume.Attachments))
-				} else {
-					return "", fmt.Errorf(
-						"Volume attach failed: state is %v", *attachment.State)
-				}
-			}
-
-			log("\tWaiting for EBS attach to complete...\n")
-			time.Sleep(5 * time.Second)
+		err = d.waitUntilAttached(name)
+		if err != nil {
+			return "", err
 		}
 
 		// Finally, the attach is complete.

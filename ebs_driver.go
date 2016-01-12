@@ -10,13 +10,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/satori/go.uuid"
 )
 
 type ebsVolumeDriver struct {
 	ec2                 *ec2.EC2
-	ec2meta             *ec2metadata.Client
+	ec2meta             *ec2metadata.EC2Metadata
 	awsInstanceId       string
 	awsRegion           string
 	awsAvailabilityZone string
@@ -45,7 +46,7 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 		return nil, err
 	}
 
-	d.ec2 = ec2.New(aws.NewConfig().WithRegion(d.awsRegion))
+	d.ec2 = ec2.New(session.New(), &aws.Config{Region: aws.String(d.awsRegion)})
 
 	// Print some diagnostic information and then return the driver.
 	log("Auto-detected EC2 information:\n")

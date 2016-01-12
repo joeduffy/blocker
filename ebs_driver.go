@@ -28,7 +28,9 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	d := &ebsVolumeDriver{
 		volumes: make(map[string]string),
 	}
-	d.ec2meta = ec2metadata.New(nil)
+
+	ec2sess := session.New()
+	d.ec2meta = ec2metadata.New(ec2sess)
 
 	// Fetch AWS information, validating along the way.
 	if !d.ec2meta.Available() {
@@ -46,7 +48,7 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 		return nil, err
 	}
 
-	d.ec2 = ec2.New(session.New(), &aws.Config{Region: aws.String(d.awsRegion)})
+	d.ec2 = ec2.New(ec2sess, &aws.Config{Region: aws.String(d.awsRegion)})
 
 	// Print some diagnostic information and then return the driver.
 	log("Auto-detected EC2 information:\n")

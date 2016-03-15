@@ -245,11 +245,14 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 	// for recommended naming scheme (/dev/sd[f-p]).
 	for _, c := range "fghijklmnop" {
 		dev := "/dev/sd" + string(c)
+		altdev := "/dev/xvd" + string(c)
 
-		// TODO: we could check locally first to eliminate a few network
-		//     roundtrips in the event that some devices are used.  Even if we
-		//     did that, however, we'd need the checks regarding the AWS request
-		//     failing below, because of TOCTOU.
+		if _, err := os.Lstat(dev); err == nil {
+			continue
+		}
+		if _, err := os.Lstat(altdev); err == nil {
+			continue
+		}
 
 		if _, err := d.ec2.AttachVolume(&ec2.AttachVolumeInput{
 			Device:     aws.String(dev),
@@ -276,7 +279,6 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 		if _, err := os.Lstat(dev); os.IsNotExist(err) {
 			// On newer Linux kernels, /dev/sd* is mapped to /dev/xvd*.  See
 			// if that's the case.
-			altdev := "/dev/xvd" + string(c)
 			if _, err := os.Lstat(altdev); os.IsNotExist(err) {
 				d.detachVolume(name)
 				return "", fmt.Errorf("Device %v is missing after attach.", dev)

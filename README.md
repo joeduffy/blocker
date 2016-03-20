@@ -94,3 +94,28 @@ simply needs multiple implementations).  If you want to contribute this, I'm
 happy to accept pull requests, so long as it doesn't complicate the original
 intent of keeping this driver as simple as possible.
 
+## Known issues
+
+#####`Error response from daemon: 400 Bad Request: malformed Host header` 
+For older docker version blocker must be built using golang 1.5. This could be done with the following command
+
+    docker run \
+        --rm \
+        -v "$PWD":/usr/src/myapp \
+        -w /usr/src/myapp \
+        golang:1.5 sh -c 'go get -v; go build -v -o blocker'
+
+Related issues: [docker#20865](https://github.com/docker/docker/issues/20865), [rexray#317](https://github.com/emccode/rexray/issues/317)
+
+#####`Error response from daemon: no such file or directory`
+May happen when docker is running with enabled selinux. As a workadund disable selinux for particular container with `--security-opt=label:disable`
+
+e.g.
+
+    docker run \
+        --security-opt=label:disable \
+        --volume-driver blocker \
+        -v vol-933e6c67:/data/db \
+        mongo
+        
+Related issues: [docker:#18005](https://github.com/docker/docker/issues/18005)

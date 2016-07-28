@@ -60,75 +60,175 @@ func main() {
 
 func makeRoutes(d VolumeDriver) http.Handler {
 	r := mux.NewRouter()
-	// TODO: permit options in the name string.
 	r.HandleFunc("/Plugin.Activate", servePluginActivate)
-	r.HandleFunc("/VolumeDriver.Create", serveVolumeSimple(d.Create))
-	r.HandleFunc("/VolumeDriver.Mount", serveVolumeComplex(d.Mount))
-	r.HandleFunc("/VolumeDriver.Path", serveVolumeComplex(d.Path))
-	r.HandleFunc("/VolumeDriver.Remove", serveVolumeSimple(d.Remove))
-	r.HandleFunc("/VolumeDriver.Unmount", serveVolumeSimple(d.Unmount))
+	r.HandleFunc("/VolumeDriver.Create", serveVolumeDriverCreate(d))
+	r.HandleFunc("/VolumeDriver.Mount", serveVolumeDriverMount(d))
+	r.HandleFunc("/VolumeDriver.Path", serveVolumeDriverPath(d))
+	r.HandleFunc("/VolumeDriver.Remove", serveVolumeDriverRemove(d))
+	r.HandleFunc("/VolumeDriver.Unmount", serveVolumeDriverUnmount(d))
 	return r
 }
 
-type pluginInfoResponse struct {
+// Plugin.Activate:
+
+type pluginActivateResponse struct {
 	Implements []string
 }
 
 func servePluginActivate(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(pluginInfoResponse{
+	json.NewEncoder(w).Encode(pluginActivateResponse{
 		Implements: []string{"VolumeDriver"},
 	})
 }
 
-type volumeRequest struct {
+// VolumeDriver.Create:
+
+type volumeDriverCreateRequest struct {
 	Name string
+	Opts map[string]string
 }
 
-type volumeSimpleResponse struct {
+type volumeDriverCreateResponse struct {
 	Err string
 }
 
-func serveVolumeSimple(f func(string) error) http.HandlerFunc {
+func serveVolumeDriverCreate(d VolumeDriver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log("* %s\n", r.URL.String())
-		var vol volumeRequest
-		err := json.NewDecoder(r.Body).Decode(&vol)
+		var req volumeDriverCreateRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
 		if err == nil {
-			err = f(vol.Name)
-			log("\tdone: (%s): %v\n", vol.Name, err)
+			err = d.Create(req.Name, req.Opts)
+			log("\tdone: (%s): %v\n", req.Name, err)
 		}
 		var errs string
 		if err != nil {
 			errs = err.Error()
 		}
-		json.NewEncoder(w).Encode(volumeSimpleResponse{
+		json.NewEncoder(w).Encode(volumeDriverCreateResponse{
 			Err: errs,
 		})
 	}
 }
 
-type volumeComplexResponse struct {
+// VolumeDriver.Mount:
+
+type volumeDriverMountRequest struct {
+	Name string
+}
+
+type volumeDriverMountResponse struct {
 	Mountpoint string
 	Err        string
 }
 
-func serveVolumeComplex(f func(string) (string, error)) http.HandlerFunc {
+func serveVolumeDriverMount(d VolumeDriver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log("* %s\n", r.URL.String())
-		var vol volumeRequest
-		err := json.NewDecoder(r.Body).Decode(&vol)
+		var req volumeDriverMountRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
 		var mountpoint string
 		if err == nil {
-			mountpoint, err = f(vol.Name)
-			log("\tdone: (%s): (%s, %v)\n", vol.Name, mountpoint, err)
+			mountpoint, err = d.Mount(req.Name)
+			log("\tdone: (%s): (%s, %v)\n", req.Name, mountpoint, err)
 		}
 		var errs string
 		if err != nil {
 			errs = err.Error()
 		}
-		json.NewEncoder(w).Encode(volumeComplexResponse{
+		json.NewEncoder(w).Encode(volumeDriverMountResponse{
 			Mountpoint: mountpoint,
 			Err:        errs,
+		})
+	}
+}
+
+// VolumeDriver.Path:
+
+type volumeDriverPathRequest struct {
+	Name string
+}
+
+type volumeDriverPathResponse struct {
+	Mountpoint string
+	Err        string
+}
+
+func serveVolumeDriverPath(d VolumeDriver) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var req volumeDriverPathRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		var mountpoint string
+		if err == nil {
+			mountpoint, err = d.Path(req.Name)
+			log("\tdone: (%s): (%s, %v)\n", req.Name, mountpoint, err)
+		}
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeDriverPathResponse{
+			Mountpoint: mountpoint,
+			Err:        errs,
+		})
+	}
+}
+
+// VolumeDriver.Remove:
+
+type volumeDriverRemoveRequest struct {
+	Name string
+}
+
+type volumeDriverRemoveResponse struct {
+	Err string
+}
+
+func serveVolumeDriverRemove(d VolumeDriver) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var req volumeDriverRemoveRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err == nil {
+			err = d.Remove(req.Name)
+			log("\tdone: (%s): %v\n", req.Name, err)
+		}
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeDriverRemoveResponse{
+			Err: errs,
+		})
+	}
+}
+
+// VolumeDriver.Unmount:
+
+type volumeDriverUnmountRequest struct {
+	Name string
+}
+
+type volumeDriverUnmountResponse struct {
+	Err string
+}
+
+func serveVolumeDriverUnmount(d VolumeDriver) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var req volumeDriverUnmountRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err == nil {
+			err = d.Unmount(req.Name)
+			log("\tdone: (%s): %v\n", req.Name, err)
+		}
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeDriverUnmountResponse{
+			Err: errs,
 		})
 	}
 }

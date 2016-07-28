@@ -7,7 +7,7 @@ package main
 type VolumeDriver interface {
 	// Instructs the plugin about a new volume.  The plugin need not actually
 	// manifest the volume on the filesystem yet, until Mount is called.
-	Create(name string) error
+	Create(name string, opts map[string]string) error
 
 	// Mounts a volume, returning its mountpoint on the host filesystem.
 	Mount(name string) (string, error)

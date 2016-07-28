@@ -15,18 +15,24 @@ import (
 	"github.com/satori/go.uuid"
 )
 
+type ebsVolume struct {
+	name     string
+	mount    string
+	volumeId string
+}
+
 type ebsVolumeDriver struct {
 	ec2                 *ec2.EC2
 	ec2meta             *ec2metadata.EC2Metadata
 	awsInstanceId       string
 	awsRegion           string
 	awsAvailabilityZone string
-	volumes             map[string]string
+	volumes             map[string]*ebsVolume
 }
 
 func NewEbsVolumeDriver() (VolumeDriver, error) {
 	d := &ebsVolumeDriver{
-		volumes: make(map[string]string),
+		volumes: make(map[string]*ebsVolume),
 	}
 
 	ec2sess := session.New()
@@ -58,55 +64,64 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	return d, nil
 }
 
-func (d *ebsVolumeDriver) Create(name string) error {
-	m, exists := d.volumes[name]
+func (d *ebsVolumeDriver) Create(name string, opts map[string]string) error {
+	vol, exists := d.volumes[name]
 	if exists {
 		// Docker won't always cleanly remove entries.  It's okay so long
 		// as the target isn't already mounted by someone else.
-		if m != "" {
+		if vol.mount != "" {
 			return errors.New("Name already in use.")
 		}
+	} else {
+		// Create a new volume, defaulting the ID to its name, and add it to the map.
+		vol = &ebsVolume{name: name, mount: "", volumeId: name}
+		d.volumes[name] = vol
 	}
 
-	d.volumes[name] = ""
+	// If a volume ID was given as an override, use it.
+	volumeId, exists := opts["volume_id"]
+	if exists {
+		vol.volumeId = volumeId
+	}
+
 	return nil
 }
 
 func (d *ebsVolumeDriver) Mount(name string) (string, error) {
-	m, exists := d.volumes[name]
+	vol, exists := d.volumes[name]
 	if !exists {
 		return "", errors.New("Name not found.")
 	}
 
-	if m != "" {
+	if vol.mount != "" {
 		return "", errors.New("Volume already mounted.")
 	}
 
-	return d.doMount(name)
+	return d.doMount(vol)
 }
 
 func (d *ebsVolumeDriver) Path(name string) (string, error) {
-	m, exists := d.volumes[name]
+	vol, exists := d.volumes[name]
 	if !exists {
 		return "", errors.New("Name not found.")
 	}
 
-	if m == "" {
+	if vol.mount == "" {
 		return "", errors.New("Volume not mounted.")
 	}
 
-	return m, nil
+	return vol.mount, nil
 }
 
 func (d *ebsVolumeDriver) Remove(name string) error {
-	m, exists := d.volumes[name]
+	vol, exists := d.volumes[name]
 	if !exists {
 		return errors.New("Name not found.")
 	}
 
 	// If the volume is still mounted, unmount it before removing it.
-	if m != "" {
-		err := d.doUnmount(name)
+	if vol.mount != "" {
+		err := d.doUnmount(vol)
 		if err != nil {
 			return err
 		}
@@ -117,15 +132,15 @@ func (d *ebsVolumeDriver) Remove(name string) error {
 }
 
 func (d *ebsVolumeDriver) Unmount(name string) error {
-	m, exists := d.volumes[name]
+	vol, exists := d.volumes[name]
 	if !exists {
 		return errors.New("Name not found.")
 	}
 
 	// If the volume is mounted, go ahead and unmount it.  Ignore requests
 	// to unmount volumes that aren't actually mounted.
-	if m != "" {
-		err := d.doUnmount(name)
+	if vol.mount != "" {
+		err := d.doUnmount(vol)
 		if err != nil {
 			return err
 		}
@@ -134,41 +149,41 @@ func (d *ebsVolumeDriver) Unmount(name string) error {
 	return nil
 }
 
-func (d *ebsVolumeDriver) doMount(name string) (string, error) {
+func (d *ebsVolumeDriver) doMount(vol *ebsVolume) (string, error) {
 	// Auto-generate a random mountpoint.
-	mnt := "/mnt/blocker/" + uuid.NewV4().String()
+	mount := "/mnt/blocker/" + uuid.NewV4().String()
 
 	// Ensure the directory /mnt/blocker/<m> exists.
-	if err := os.MkdirAll(mnt, os.ModeDir|0700); err != nil {
+	if err := os.MkdirAll(mount, os.ModeDir|0700); err != nil {
 		return "", err
 	}
-	if stat, err := os.Stat(mnt); err != nil || !stat.IsDir() {
-		return "", fmt.Errorf("Mountpoint %v is not a directory: %v", mnt, err)
+	if stat, err := os.Stat(mount); err != nil || !stat.IsDir() {
+		return "", fmt.Errorf("Mountpoint %v is not a directory: %v", mount, err)
 	}
 
 	// Attach the EBS device to the current EC2 instance.
-	dev, err := d.attachVolume(name)
+	dev, err := d.attachVolume(vol)
 	if err != nil {
 		return "", err
 	}
 
 	// Now go ahead and mount the EBS device to the desired mountpoint.
 	// TODO: support encrypted filesystems.
-	if out, err := exec.Command("mount", dev, mnt).CombinedOutput(); err != nil {
+	if out, err := exec.Command("mount", dev, mount).CombinedOutput(); err != nil {
 		// Make sure to detach the instance before quitting (ignoring errors).
-		d.detachVolume(name)
+		d.detachVolume(vol)
 
 		return "", fmt.Errorf("Mounting device %v to %v failed: %v\n%v",
-			dev, mnt, err, string(out))
+			dev, mount, err, string(out))
 	}
 
-	// And finally set and return it.
-	d.volumes[name] = mnt
-	return mnt, nil
+	// Set the volume's mountpoint and return it.
+	vol.mount = mount
+	return mount, nil
 }
 
 func (d *ebsVolumeDriver) waitUntilState(
-	name string, check func(*ec2.Volume) error) error {
+	volumeId string, check func(*ec2.Volume) error) error {
 	// Most volume operations are asynchronous, and we often need to wait until
 	// state transitions finish before proceeding to the mount.  Sadly, this
 	// requires some clunky retries, sleeps, and that kind of crap.
@@ -177,7 +192,7 @@ func (d *ebsVolumeDriver) waitUntilState(
 		tries++
 
 		volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-			VolumeIds: []*string{aws.String(name)},
+			VolumeIds: []*string{aws.String(volumeId)},
 		})
 		if err != nil {
 			return err
@@ -199,8 +214,8 @@ func (d *ebsVolumeDriver) waitUntilState(
 	return nil
 }
 
-func (d *ebsVolumeDriver) waitUntilAttached(name string) error {
-	return d.waitUntilState(name, func(volume *ec2.Volume) error {
+func (d *ebsVolumeDriver) waitUntilAttached(volumeId string) error {
+	return d.waitUntilState(volumeId, func(volume *ec2.Volume) error {
 		var attachment *ec2.VolumeAttachment
 		if len(volume.Attachments) == 1 {
 			attachment = volume.Attachments[0]
@@ -220,8 +235,8 @@ func (d *ebsVolumeDriver) waitUntilAttached(name string) error {
 	})
 }
 
-func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
-	return d.waitUntilState(name, func(volume *ec2.Volume) error {
+func (d *ebsVolumeDriver) waitUntilAvailable(volumeId string) error {
+	return d.waitUntilState(volumeId, func(volume *ec2.Volume) error {
 		if *volume.State == ec2.VolumeStateAvailable {
 			return nil
 		}
@@ -231,11 +246,11 @@ func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
 	})
 }
 
-func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
+func (d *ebsVolumeDriver) attachVolume(vol *ebsVolume) (string, error) {
 	// Since detaching is asynchronous, we want to check first to see if the
 	// target volume is in the process of being detached.  If it is, we'll wait
 	// a little bit until it's ready to use.
-	err := d.waitUntilAvailable(name)
+	err := d.waitUntilAvailable(vol.volumeId)
 	if err != nil {
 		return "", err
 	}
@@ -257,7 +272,7 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 		if _, err := d.ec2.AttachVolume(&ec2.AttachVolumeInput{
 			Device:     aws.String(dev),
 			InstanceId: aws.String(d.awsInstanceId),
-			VolumeId:   aws.String(name),
+			VolumeId:   aws.String(vol.volumeId),
 		}); err != nil {
 			if awsErr, ok := err.(awserr.Error); ok &&
 				awsErr.Code() == "InvalidParameterValue" {
@@ -269,18 +284,19 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 			return "", err
 		}
 
-		err = d.waitUntilAttached(name)
+		err = d.waitUntilAttached(vol.volumeId)
 		if err != nil {
 			return "", err
 		}
 
 		// Finally, the attach is complete.
-		log("\tAttached EBS volume %v to %v:%v.\n", name, d.awsInstanceId, dev)
+		log("\tAttached EBS volume name=%v/volumeId=%v to %v:%v.\n",
+			vol.name, vol.volumeId, d.awsInstanceId, dev)
 		if _, err := os.Lstat(dev); os.IsNotExist(err) {
 			// On newer Linux kernels, /dev/sd* is mapped to /dev/xvd*.  See
 			// if that's the case.
 			if _, err := os.Lstat(altdev); os.IsNotExist(err) {
-				d.detachVolume(name)
+				d.detachVolume(vol)
 				return "", fmt.Errorf("Device %v is missing after attach.", dev)
 			}
 
@@ -294,37 +310,36 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 	return "", errors.New("No devices available for attach: /dev/sd[f-p] taken.")
 }
 
-func (d *ebsVolumeDriver) doUnmount(name string) error {
-	mnt := d.volumes[name]
-
+func (d *ebsVolumeDriver) doUnmount(vol *ebsVolume) error {
 	// First unmount the device.
-	if out, err := exec.Command("umount", mnt).CombinedOutput(); err != nil {
-		return fmt.Errorf("Unmounting %v failed: %v\n%v", mnt, err, string(out))
+	if out, err := exec.Command("umount", vol.mount).CombinedOutput(); err != nil {
+		return fmt.Errorf("Unmounting %v failed: %v\n%v", vol.mount, err, string(out))
 	}
 
 	// Remove the mountpoint from the filesystem.
-	if err := os.Remove(mnt); err != nil {
+	if err := os.Remove(vol.mount); err != nil {
 		return err
 	}
 
 	// Detach the EBS volume from this AWS instance.
-	if err := d.detachVolume(name); err != nil {
+	if err := d.detachVolume(vol); err != nil {
 		return err
 	}
 
-	// Finally clear out the slot and return.
-	d.volumes[name] = ""
+	// Clear out the mount information and return.
+	vol.mount = ""
 	return nil
 }
 
-func (d *ebsVolumeDriver) detachVolume(name string) error {
+func (d *ebsVolumeDriver) detachVolume(vol *ebsVolume) error {
 	if _, err := d.ec2.DetachVolume(&ec2.DetachVolumeInput{
 		InstanceId: aws.String(d.awsInstanceId),
-		VolumeId:   aws.String(name),
+		VolumeId:   aws.String(vol.volumeId),
 	}); err != nil {
 		return err
 	}
 
-	log("\tDetached EBS volume %v from %v.\n", name, d.awsInstanceId)
+	log("\tDetached EBS volume name=%v/volumeId=%v from %v.\n",
+		vol.name, vol.volumeId, d.awsInstanceId)
 	return nil
 }

@@ -65,6 +65,7 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 }
 
 func (d *ebsVolumeDriver) Create(name string, opts map[string]string) error {
+
 	vol, exists := d.volumes[name]
 	if exists {
 		// Docker won't always cleanly remove entries.  It's okay so long
@@ -74,7 +75,17 @@ func (d *ebsVolumeDriver) Create(name string, opts map[string]string) error {
 		}
 	} else {
 		// Create a new volume, defaulting the ID to its name, and add it to the map.
-		vol = &ebsVolume{name: name, mount: "", volumeId: name}
+		volumeId := name
+		serviceName, exists := opts["service"]
+		if exists {
+			v, err := d.getAvailableVolumeForService(serviceName)
+			if err != nil {
+				return err
+			}
+			volumeId = *v.VolumeId
+		}
+
+		vol = &ebsVolume{name: name, mount: "", volumeId: volumeId}
 		d.volumes[name] = vol
 	}
 
